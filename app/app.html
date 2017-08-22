@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>NMSDE</title>
+
+    <script>
+      (function() {
+        if (!process.env.HOT) {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = './dist/style.css';
+          // HACK: Writing the script path should be done with webpack
+          document.getElementsByTagName('head')[0].appendChild(link);
+        }
+      }());
+    </script>
+    <!-- <link rel="stylesheet" href="./app.global.css" type="text/css" /> -->
+  </head>
+  <body style="background: #1e1e1e;">
+    <div id="root"></div>
+    <script>
+      {
+        const img = document.createElement('img');
+        img.id = 'splash';
+        img.src = process.env.HOT ? 'assets/images/nmsde.png' : '../../app/assets/images/nmsde.png';
+        img.style = 'position: absolute; left: 0; right: 0; top: 36%; margin: 0px auto;';
+        document.body.appendChild(img);
+        const scripts = [];
+
+        // Dynamically insert the DLL script in development env in the
+        // renderer process
+        if (process.env.NODE_ENV === 'development') {
+          scripts.push('../dll/vendor.dll.js');
+        }
+
+        // Dynamically insert the bundled app script in the renderer process
+        const port = process.env.PORT || 1213;
+        scripts.push(
+          (process.env.HOT)
+            ? 'http://localhost:' + port + '/dist/bundle.js'
+            : './dist/bundle.js'
+        );
+
+        document.write(
+          scripts
+            .map(script => '<script defer src="' + script + '"><\/script>')
+            .join('')
+        );
+      }
+    </script>
+  </body>
+</html>
