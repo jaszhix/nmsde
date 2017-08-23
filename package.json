@@ -1,7 +1,7 @@
 {
   "name": "nmsde",
   "productName": "NMSDE",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NMS Development Environment",
   "scripts": {
     "lint": "eslint --cache --format=node_modules/eslint-formatter-pretty .",

@@ -1,4 +1,5 @@
 import {app, Menu, shell, BrowserWindow, dialog} from 'electron';
+import {version} from './package.json';
 
 export default class MenuBuilder {
   mainWindow: BrowserWindow;
@@ -280,7 +281,7 @@ export default class MenuBuilder {
                 type: 'info',
                 buttons: [],
                 title: 'No Man\'s Sky Development Environment',
-                message: 'v0.1.0',
+                message: version,
                 detail: `
 NMSDE would not be made possible without the efforts of monkeyman192, and other contributors work on MBINCompiler. Associated binaries' licenses are available on the Github repository.
 
