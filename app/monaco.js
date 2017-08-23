@@ -1,7 +1,8 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 
-
+// Temporary file in use until #50 is merged
+// https://github.com/superRaytin/react-monaco-editor/pull/50
 function noop() { }
 
 

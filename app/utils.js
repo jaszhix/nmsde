@@ -149,7 +149,7 @@ const decompileMBINFiles = (mbinDir, exmlDir) => {
         let exmlPath = file.replace(/[.]MBIN/g, '.exml').replace(/MBINs/g, 'EXMLs');
         let exmlDir = exmlPath.split(_.last(exmlPath.split(S)))[0];
         fse.ensureDirSync(exmlDir);
-        let command = `.\\bin\\MBINCompiler.exe ${file} ${exmlPath}`;
+        let command = `.${S}bin${S}MBINCompiler.exe "${file}" "${exmlPath}"`;
         if (shouldUseSync) {
           exc(command);
           status.set(success);
@@ -184,7 +184,7 @@ const extractPakFiles = (workDir, mbinDir, exmlDir) => {
         fs.mkdirSync(fileDir);
       }
       if (fs.existsSync(pakPath)) {
-        exc(`.\\bin\\psarc.exe extract -y --input=${pakPath} --to=${fileDir}`);
+        exc(`.${S}bin${S}psarc.exe extract -y --input="${pakPath}" --to="${fileDir}"`);
       }
       status.set(`${getPercent(i + 1, _filesLength)}% Extracted ${pakPath}`);
     });
@@ -260,7 +260,7 @@ const compileMBINFiles = (workDir, stagingDir) => {
       let fail = `${percentage} Failed to compile ${file}`;
       try {
         let mbinPath = file.replace(/[.]exml/g, '.MBIN');
-        let command = `.\\bin\\MBINCompiler.exe ${file} ${mbinPath}`;
+        let command = `.${S}bin${S}MBINCompiler.exe "${file}" "${mbinPath}"`;
 
         exc(command);
         psarcList.push(mbinPath);

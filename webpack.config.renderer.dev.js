@@ -14,6 +14,7 @@ import chalk from 'chalk';
 import merge from 'webpack-merge';
 import {spawn, execSync} from 'child_process';
 import ExtractTextPlugin from 'extract-text-webpack-plugin';
+import CopyWebpackPlugin from 'copy-webpack-plugin';
 import baseConfig from './webpack.config.base';
 
 const port = process.env.PORT || 1213;
@@ -216,6 +217,12 @@ export default merge.smart(baseConfig, {
     new ExtractTextPlugin({
       filename: '[name].css'
     }),
+    new CopyWebpackPlugin([
+      {
+        from: 'node_modules/monaco-editor/min/vs',
+        to: 'vs',
+      }
+    ])
   ],
 
   devServer: {

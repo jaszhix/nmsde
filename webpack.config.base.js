@@ -4,7 +4,6 @@
 
 import path from 'path';
 import webpack from 'webpack';
-import CopyWebpackPlugin from 'copy-webpack-plugin';
 import {dependencies as externals} from './app/package.json';
 
 export default {
@@ -43,11 +42,6 @@ export default {
 
   plugins: [
     new webpack.NamedModulesPlugin(),
-    new CopyWebpackPlugin([
-      {
-        from: 'node_modules/monaco-editor/min/vs',
-        to: 'vs',
-      }
-    ])
+    new webpack.optimize.ModuleConcatenationPlugin()
   ],
 };
