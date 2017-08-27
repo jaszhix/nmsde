@@ -187,6 +187,14 @@ export default class MenuBuilder {
           },
           {type: 'separator'},
           {
+            label: `&Toggle Multithreading`,
+            accelerator: 'Ctrl+D',
+            click: () => {
+              this.mainWindow.webContents.executeJavaScript(`toggleMultiThreading()`);
+            }
+          },
+          {type: 'separator'},
+          {
             label: '&Clear Workspace',
             accelerator: 'Ctrl+D',
             click: () => {

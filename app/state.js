@@ -26,11 +26,14 @@ const state = Reflux.createStore({
       height: window.innerHeight - 20,
       exmlFiles: [],
       activeFile: '',
-      appStatus: 'Preparing workspace, please wait...',
       triggerSave: false,
+      treePaneSize: 400,
+      multiThreading: false,
     };
     this.configKeys = [
-      'workDir'
+      'workDir',
+      'treePaneSize',
+      'multiThreading'
     ];
   },
   set(obj, cb, writeSettings = true){
