@@ -78,19 +78,18 @@ export const exc = (cmd, cb)=>{
     execSync(cmd);
   } else {
     let opts = {
-      encoding: 'utf8',
       timeout: 0,
-      maxBuffer: 200*1024,
+      maxBuffer: 2000*1024,
       killSignal: 'SIGTERM',
       cwd: null,
       env: null
     };
-    if (process.platform === 'win32') {
+    /* if (process.platform === 'win32') {
       opts.shell = 'powershell.exe';
     } else {
       opts.shell = '/bin/sh';
-    }
-    exec(cmd, cb)
+    } */
+    exec(cmd, opts, cb)
   }
 
 };
@@ -133,67 +132,238 @@ export const getSelected = (exmlFiles = []) => {
   return selected;
 }
 
-const decompileMBINFiles = (mbinDir, exmlDir) => {
+const next = (i, multiThreading, func, endFunc) => {
+  _.defer(()=>{
+    if (!multiThreading) {
+      func(i + 1);
+    }
+    if (endFunc) {
+      endFunc(i);
+    }
+  });
+};
+
+export const getReadyStatusText = (workDir) => {
+  return `Workspace ready at ${workDir}`;
+};
+
+export const addFile = (file, s) => {
+  const extension = _.last(file.split('.')).toLowerCase();
+  let key = file.split(`EXMLs${S}`)[1].split(S)[0]
+  key = key.substr(1, key.length);
+  let refPak = _.findIndex(s.exmlFiles, {pak: key});
+  if (refPak === -1) {
+    s.exmlFiles.push({
+      pak: key,
+      exmls: [],
+      selected: false,
+      expanded: false
+    });
+    refPak = s.exmlFiles.length - 1;
+  }
+  s.exmlFiles[refPak].exmls.push({
+    parent: key,
+    name: _.last(file.split(S)),
+    path: file,
+    selected: false,
+    extension: extension
+  });
+  s.exmlFiles[refPak].exmls = _.uniqBy(s.exmlFiles[refPak].exmls, 'path');
+};
+
+export const getFileList = () => {
+  const s = state.get();
+  const exmlDir = `${s.workDir}${S}EXMLs`;
+  walk(exmlDir, (err, files)=>{
+    if (err) {
+      log.error(err);
+    }
+    const filesLength = files.length;
+    each(files, (file, i)=>{
+      status.set(`Loading files (${getPercent(i + 1, filesLength)}%)`)
+      addFile(file, s);
+    });
+    state.set({exmlFiles: s.exmlFiles});
+    let readyState = filesLength > 0 ? `Loaded ${filesLength} file${filesLength > 1 ? 's' : ''} from ${exmlDir}`
+      :
+      getReadyStatusText(workDir);
+    status.set(readyState);
+    window.decompiling = false;
+  });
+};
+
+const decompileMBINFiles = (mbinDir, exmlDir, multiThreading) => {
+  window.decompiling = true;
+  editorValue.set('');
   walk(mbinDir, (err, files)=>{
     const _files = _.filter(files, (file)=>{
       let extension = _.last(file.split('.'));
       return extension.toLowerCase() === 'mbin';
     });
+    const nonMBINFiles = _.filter(files, (file)=>{
+      let extension = _.last(file.split('.')).toLowerCase();
+      return extension === 'dds' || extension === 'bin';
+    });
+    each(nonMBINFiles, (file)=>{
+      let exmlPath = file.replace(/MBINs/g, 'EXMLs');
+      fse.moveSync(file, exmlPath, {overwrite: true});
+    });
     const _filesLength = _files.length;
-    const shouldUseSync = _filesLength > 4000;
-    each(_files, (file, i)=>{
-      let percentage = `${getPercent(i + 1, _filesLength)}%`;
-      let success = `${percentage} Decompiled ${file}`;
-      let fail = `${percentage} Failed to decompile ${file}`;
+    let z = 0;
+    const end = () => {
+      if (z >= _filesLength - 1) {
+        getFileList();
+      }
+    };
+    const handleSuccess = (file, i, func) => {
+      z++
+      let percentage = `${getPercent(z, _filesLength)}%`;
+      status.set(`${percentage} Decompiled ${file}`);
+      next(i, multiThreading, func, end);
+    };
+    const handleFail = (file, i, mbinFailures, func) => {
+      z++
+      mbinFailures.push(file);
+      state.set({mbinFailures: mbinFailures});
+      status.set(`Failed to decompile ${file}`);
+      next(i, multiThreading, func, end);
+    };
+    const decompile = (i) => {
+      if (!_files[i]) {
+        getFileList();
+        return;
+      }
+      const file = _files[i];
+      const s = state.get();
       try {
         let exmlPath = file.replace(/[.]MBIN/g, '.exml').replace(/MBINs/g, 'EXMLs');
+        // Make sure files are only processed once
+        let refFailFile = _.findIndex(s.mbinFailures, {file: file});
+        if (fs.existsSync(exmlPath) || refFailFile > -1) {
+          z++;
+          next(i, multiThreading, decompile, end);
+          return;
+        }
         let exmlDir = exmlPath.split(_.last(exmlPath.split(S)))[0];
         fse.ensureDirSync(exmlDir);
         let command = `.${S}bin${S}MBINCompiler.exe "${file}" "${exmlPath}"`;
-        if (shouldUseSync) {
+        if (!multiThreading) {
           exc(command);
-          status.set(success);
+          handleSuccess(file, i, decompile);
         } else {
           exc(command, (err, stdout, stderr)=>{
-            if (err) {
-              status.set(fail);
+            let hasStdErr = stderr.trim().length > 0;
+            let _err = hasStdErr ? stderr : err;
+            if (_err) {
+              let editorString = editorValue.get();
+              editorString += 'MBINCompiler error(s):\n';
+              editorString += `${file}:\n`;
+              editorString += `${_err}\n`;
+              editorValue.set(editorString);
+              handleFail(file, i, s.mbinFailures, decompile);
             } else {
-              status.set(success);
+              handleSuccess(file, i, decompile);
             }
           });
         }
       } catch (e) {
-        status.set(fail);
+        handleFail(file, i, s.mbinFailures, decompile);
       }
-    });
+    };
+    if (multiThreading) {
+      // Don't launch a ton of MBINCompiler processes at once
+      let count = 0;
+      each(_files, (file, i)=>{
+        if (count < 3) {
+          decompile(i);
+        } else {
+          _.delay(()=>decompile(i), (i + 1) * 2);
+          count = -1;
+        }
+        count++;
+      });
+    } else {
+      decompile(0);
+    }
   });
 };
 
-const extractPakFiles = (workDir, mbinDir, exmlDir) => {
+const extractPakFiles = (workDir, mbinDir, exmlDir, exmlFiles, multiThreading) => {
   fs.readdir(workDir, (err, files)=>{
     const _files = _.filter(files, (file)=>{
       let extension = _.last(file.split('.'));
       return extension.toLowerCase() === 'pak';
     });
     const _filesLength = _files.length;
-    each(_files, (file, i)=>{
+    const end = (i) => {
+      if (i === _filesLength - 1) {
+        status.set('Decompiling MBINs, please wait...');
+        decompileMBINFiles(mbinDir, exmlDir, multiThreading);
+      }
+    };
+    const extract = (i) => {
+      const file = _files[i];
       const fileDir = `${mbinDir}${S}_${file}`
         .replace(/[.]pak/g, '');
       const pakPath = `${workDir}${S}${file}`;
-      if (!fs.existsSync(fileDir)) {
-        fs.mkdirSync(fileDir);
+      let shouldSkip = false;
+      each(exmlFiles, (pak)=>{
+        if (`${pak.pak}.pak` === file) {
+          shouldSkip = true;
+        }
+      });
+      if (shouldSkip) {
+        next(i, multiThreading, extract, end);
+        return;
       }
+      fse.ensureDirSync(fileDir);
       if (fs.existsSync(pakPath)) {
-        exc(`.${S}bin${S}psarc.exe extract -y --input="${pakPath}" --to="${fileDir}"`);
+        let command = `.${S}bin${S}psarc.exe extract -y --input="${pakPath}" --to="${fileDir}"`;
+        let success = `${getPercent(i + 1, _filesLength)}% Extracted ${pakPath}`;
+        let fail = `Failed to extract ${pakPath}`;
+        try {
+          if (!multiThreading) {
+            exc(command);
+            status.set(success);
+            next(i, multiThreading, extract, end);
+          } else {
+            exc(command, (err, stdout, stderr)=>{
+              let hasStdErr = stderr.trim().length > 0;
+              let _err = hasStdErr ? stderr : err;
+              if (_err) {
+                let editorString = editorValue.get();
+                editorString += `${file}:\n`;
+                editorString += `${_err}\n`;
+                editorValue.set(editorString);
+                status.set(fail);
+                next(i, multiThreading, extract, end);
+              } else {
+                status.set(success);
+                next(i, multiThreading, extract, end);
+              }
+            });
+          }
+
+        } catch (e) {
+          status.set(fail);
+          next(i, multiThreading, extract, end);
+        }
       }
-      status.set(`${getPercent(i + 1, _filesLength)}% Extracted ${pakPath}`);
-    });
-    status.set('Decompiling MBINs, please wait...');
-    decompileMBINFiles(mbinDir, exmlDir);
+    };
+    if (multiThreading) {
+      each(_files, (file, i)=>{
+        extract(i);
+      });
+    } else {
+      extract(0);
+    }
   });
 };
 
 export const copyPakFiles = (pakFiles) => {
+  if (window.clearingWorkspace) {
+    return;
+  }
   const s = state.get();
   const mbinDir = `${s.workDir}${S}MBINs`;
   const exmlDir = `${s.workDir}${S}EXMLs`;
@@ -203,28 +373,54 @@ export const copyPakFiles = (pakFiles) => {
     fse.copySync(pakFile, `${s.workDir}${S}${file.replace(/\s/g, '.')}`);
   });
   status.set('Extracting PAK files, please wait...');
-  extractPakFiles(s.workDir, mbinDir, exmlDir);
+  extractPakFiles(s.workDir, mbinDir, exmlDir, s.exmlFiles, s.multiThreading);
 };
 window.copyPakFiles = copyPakFiles;
 
 export const clearWorkSpace = () => {
+  if (window.clearingWorkspace || window.decompiling) {
+    return;
+  }
+  window.clearingWorkspace = true;
   const s = state.get();
   status.set('Clearing workspace, please wait...');
-  fse.emptyDir(s.workDir, (err)=>{
-    if (err) {
-      log.error(err);
+  walk(s.workDir, (err, files)=>{
+    const filesLength = files.length;
+    const next = (i, func) => {
+      let percentage = `${getPercent(i + 1, filesLength)}%`;
+      status.set(`${percentage} Deleted ${files[i]}`);
+      if (i === filesLength - 1) {
+        init(s.workDir);
+        state.set({exmlFiles: []});
+        editorValue.set('');
+        status.set('Finished clearing the workspace');
+        window.clearingWorkspace = false;
+      } else {
+        _.defer(()=>func(i + 1));
+      }
     }
-    init(s.workDir);
-    state.set({exmlFiles: []});
-    editorValue.set('');
-    status.set('Finished clearing the workspace');
+    const remove = (i) => {
+      fse.remove(files[i], (err)=>{
+        if (err) {
+          log.error(err);
+          status.set(`Unable to remove file: ${err}`);
+        }
+        next(i, remove);
+      });
+    };
+    remove(0);
   });
 };
 window.clearWorkSpace = clearWorkSpace;
 
 const buildPAKFile = (psarcList, stagingDir, workDir) => {
   status.set('Building PAK file')
-  exc(`.${S}bin${S}_psarc.exe ${psarcList.join(' ')}`);
+  const fail = 'PAK file failed to build.';
+  try {
+    exc(`.${S}bin${S}_psarc.exe ${psarcList.join(' ')}`);
+  } catch (e) {
+    status.set(fail);
+  }
   walk(stagingDir, (err, files)=>{
     if (err) {
       log.error(err);
@@ -238,7 +434,7 @@ const buildPAKFile = (psarcList, stagingDir, workDir) => {
       fse.moveSync(_files[0], destination);
       status.set(`PAK file successfully created at ${destination}`);
     } else {
-      status.set('PAK file failed to build.');
+      status.set(fail);
     }
   });
 };
@@ -252,22 +448,29 @@ const compileMBINFiles = (workDir, stagingDir) => {
       let extension = _.last(file.split('.'));
       return extension.toLowerCase() === 'exml';
     });
+    const nonMBINFiles = _.filter(files, (file)=>{
+      let extension = _.last(file.split('.')).toLowerCase();
+      return extension === 'dds' || extension === 'bin';
+    });
     const _filesLength = _files.length;
     const psarcList = [];
     each(_files, (file, i)=>{
       let percentage = `${getPercent(i + 1, _filesLength)}%`;
       let success = `${percentage} Compiled ${file}`;
-      let fail = `${percentage} Failed to compile ${file}`;
+      let fail = `Failed to compile ${file}`;
       try {
         let mbinPath = file.replace(/[.]exml/g, '.MBIN');
         let command = `.${S}bin${S}MBINCompiler.exe "${file}" "${mbinPath}"`;
-
         exc(command);
         psarcList.push(mbinPath);
         status.set(success);
       } catch (e) {
         status.set(fail);
       }
+    });
+    each(nonMBINFiles, (file)=>{
+      psarcList.push(file);
+      status.set(`Added file to build ${file}`);
     });
     buildPAKFile(psarcList, stagingDir, workDir);
   });
@@ -284,12 +487,17 @@ const rebuildXMLFiles = (selectedFiles) => {
   }
   const builder = new xml2js.Builder();
   each(selectedFiles, (file)=>{
-    const xml = builder.buildObject(file.xmlObject);
-    const stagingPath = `${stagingDir}${S}${file.pakPath}`;//file.path.replace(/EXMLs/g, 'staging');
+    const stagingPath = `${stagingDir}${S}${file.pakPath}`;
     const ensurePath = stagingPath.split(_.last(stagingPath.split(S)))[0];
     fse.ensureDirSync(ensurePath);
-    fs.writeFileSync(stagingPath, xml, {flag: 'w', encoding: 'utf8'});
-    status.set(`Rebuilt XML file ${stagingDir}`)
+    if (file.extension === 'exml') {
+      const xml = builder.buildObject(file.xmlObject);
+      fs.writeFileSync(stagingPath, xml, {flag: 'w', encoding: 'utf8'});
+      status.set(`Rebuilt XML file ${stagingPath}`);
+    } else {
+      fse.copySync(file.path, stagingPath);
+      status.set(`Copied file to staging directory ${stagingPath}`);
+    }
   });
   status.set('Compiling MBIN files, please wait...');
   compileMBINFiles(s.workDir, stagingDir);
@@ -330,6 +538,17 @@ const checkAndMerge = (selectedFiles, conflicts, conflictPaths) => {
 
 const getXMLObject = (selectedFiles, i, conflicts, conflictPaths) => {
   status.set(`Processing XML for ${selectedFiles[i].path}`);
+  const next = () => {
+    if (selectedFiles[i + 1]) {
+      getXMLObject(selectedFiles, i + 1, conflicts, conflictPaths);
+    } else {
+      checkAndMerge(selectedFiles, conflicts, conflictPaths);
+    }
+  };
+  if (selectedFiles[i].extension !== 'exml') {
+    next();
+    return;
+  }
   fs.readFile(selectedFiles[i].path, 'utf-8', (err, data)=>{
     if (err) {
       log.error(err);
@@ -340,11 +559,7 @@ const getXMLObject = (selectedFiles, i, conflicts, conflictPaths) => {
       }
       selectedFiles[i].xmlObject = xml;
       status.set(`Retrieved XML object for ${selectedFiles[i].path}`);
-      if (selectedFiles[i + 1]) {
-        getXMLObject(selectedFiles, i + 1, conflicts, conflictPaths);
-      } else {
-        checkAndMerge(selectedFiles, conflicts, conflictPaths);
-      }
+      next();
     });
   });
 };
@@ -363,7 +578,7 @@ export const compileSelection = () => {
     let refCheckedPath = _.findIndex(checkedFiles, {pakPath: selectedFiles[i].pakPath});
     if (refCheckedPath === -1) {
       checkedFiles.push(selectedFiles[i]);
-    } else {
+    } else if (checkedFiles[refCheckedPath].extension === 'exml') {
       if (!conflicts[selectedFiles[i].pakPath]) {
         conflicts[selectedFiles[i].pakPath] = [];
       } else {
@@ -399,3 +614,9 @@ export const saveCurrentFile = () => {
   });
 };
 window.saveCurrentFile = saveCurrentFile;
+
+const toggleMultiThreading = () => {
+  let multiThreading = state.get().multiThreading;
+  state.set({multiThreading: !multiThreading});
+};
+window.toggleMultiThreading = toggleMultiThreading;

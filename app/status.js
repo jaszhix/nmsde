@@ -3,7 +3,7 @@ import Reflux from 'reflux';
 const status = Reflux.createStore({
   init() {
     this.state = {
-      status: 'Initializing'
+      status: 'Preparing workspace, please wait...'
     }
   },
   set(status) {

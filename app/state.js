@@ -25,10 +25,11 @@ const state = Reflux.createStore({
       width: window.innerWidth,
       height: window.innerHeight - 20,
       exmlFiles: [],
+      mbinFailures: [],
       activeFile: '',
       triggerSave: false,
       treePaneSize: 400,
-      multiThreading: false,
+      multiThreading: true,
     };
     this.configKeys = [
       'workDir',

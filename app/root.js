@@ -10,7 +10,7 @@ import Reflux from 'reflux';
 import _ from 'lodash';
 import v from 'vquery';
 
-import {init, walk, S, getSelected, getPercent, _log as log} from './utils';
+import {init, S, getFileList, addFile, getSelected, getReadyStatusText, _log as log} from './utils';
 import EditorContainer from './editorContainer';
 import SplitPane from 'react-split-pane';
 import Tree from './tree';
@@ -32,7 +32,7 @@ class Root extends Reflux.Component {
     || pS.init !== this.state.init && this.state.init) {
       this.stopMonitor();
       this.startMonitor();
-      this.getFileList();
+      getFileList();
     }
   }
   componentWillUnmount() {
@@ -71,7 +71,6 @@ class Root extends Reflux.Component {
         status.set(`Updated ${f}`);
       });
       this.monitor.on('created', this.onFileCreated);
-      this.monitor.on('removed', this.removeFile);
     });
   }
   stopMonitor = () => {
@@ -80,12 +79,15 @@ class Root extends Reflux.Component {
     }
   }
   onFileCreated = (f, stat) => {
-    if (f.substr(-5, f.length) === '.exml') {
-      this.addFile(f);
+    if (window.decompiling) {
+      return;
+    }
+    const extension = _.last(f.split('.')).toLowerCase();
+    if (extension === 'exml'
+    || extension === 'dds'
+    || extension === 'bin') {
+      addFile(f);
       status.set(`Loaded ${f}`);
-    } else {
-      this.getFileList(f);
-      state.set({exmlFiles: this.state.exmlFiles});
     }
   }
   removeFile = (f, stat) => {
@@ -110,47 +112,6 @@ class Root extends Reflux.Component {
       status.set(`Deleted ${f}`);
     }
   }
-  addFile = (file) => {
-    let key = file.split(`EXMLs${S}`)[1].split(S)[0]
-    key = key.substr(1, key.length);
-    let refPak = _.findIndex(this.state.exmlFiles, {pak: key});
-    if (refPak === -1) {
-      this.state.exmlFiles.push({
-        pak: key,
-        exmls: [],
-        selected: false,
-        expanded: false
-      });
-      refPak = this.state.exmlFiles.length - 1;
-    }
-    this.state.exmlFiles[refPak].exmls.push({
-      parent: key,
-      name: _.last(file.split(S)),
-      path: file,
-      selected: false
-    });
-    return refPak;
-  }
-  getFileList = (overrideDir) => {
-    console.log(`${this.state.workDir}${S}EXMLs`);
-    const exmlDir = overrideDir ? overrideDir : `${this.state.workDir}${S}EXMLs`;
-    walk(exmlDir, (err, files)=>{
-      if (err) {
-        log.error(err);
-      }
-      const filesLength = files.length;
-      each(files, (file, i)=>{
-        status.set(`Loading files (${getPercent(i + 1, filesLength)}%)`)
-        let refPak = this.addFile(file);
-        this.state.exmlFiles[refPak].exmls = _.uniqBy(this.state.exmlFiles[refPak].exmls, 'path')
-      });
-      state.set({exmlFiles: this.state.exmlFiles});
-      let readyState = !overrideDir && filesLength > 0 ? `Loaded ${filesLength} file${filesLength > 1 ? 's' : ''} from ${exmlDir}`
-        :
-        `Workspace ready at ${this.state.workDir}`;
-      status.set(readyState);
-    });
-  }
   togglePakExpand = (i, expanded) => {
     this.state.exmlFiles[i].expanded = !expanded;
     state.set({exmlFiles: this.state.exmlFiles});
@@ -166,6 +127,11 @@ class Root extends Reflux.Component {
         exmlFiles: this.state.exmlFiles,
         activeFile: exmlPath
       });
+      const extension = this.state.exmlFiles[i].exmls[z].extension;
+      if (extension === 'bin') {
+        // TBD: Setting a GLSL-like syntax coloring for BIN files
+        monaco.editor.setModelLanguage(this.editor.getModel(), 'cpp');
+      }
       document.title = `${exmlPath} - NMSDE`;
     });
   }
@@ -175,18 +141,23 @@ class Root extends Reflux.Component {
       this.state.exmlFiles[i].exmls[z].selected = !selected
     });
     state.set({exmlFiles: this.state.exmlFiles});
-    const selectedLength = getSelected(this.state.exmlFiles).length;
-    status.set(`${selectedLength} file${selectedLength > 1 ? 's' : ''} selected`);
+    this.setSelectedStatus();
   }
   checkFile = (i, z, selected) => {
     this.state.exmlFiles[i].exmls[z].selected = !selected;
     state.set({exmlFiles: this.state.exmlFiles});
+    this.setSelectedStatus();
+  }
   onTreePaneDragFinished = (size) => {
     state.set({treePaneSize: size});
     this.editor.layout();
   }
+  setSelectedStatus = () => {
     const selectedLength = getSelected(this.state.exmlFiles).length;
-    status.set(`${selectedLength} file${selectedLength > 1 ? 's' : ''} selected`);
+    let statusText = selectedLength > 0 ? `${selectedLength} file${selectedLength > 1 ? 's' : ''} selected`
+      :
+      getReadyStatusText();
+    status.set(statusText);
   }
   render() {
     const options = {

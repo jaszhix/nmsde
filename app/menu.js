@@ -173,6 +173,9 @@ export default class MenuBuilder {
                   filters: [{name: 'PAK Files', extensions: ['pak']}]
                 },
                 paths => {
+                  if (!paths || paths.length === 0) {
+                    return;
+                  }
                   this.mainWindow.webContents.executeJavaScript(`copyPakFiles(${JSON.stringify(paths)})`);
                 }
               );
@@ -210,6 +213,9 @@ export default class MenuBuilder {
                   properties: ['openDirectory']
                 },
                 paths => {
+                  if (!paths || paths.length === 0) {
+                    return;
+                  }
                   try {
                     this.mainWindow.webContents.executeJavaScript(`state.set({workDir: ${JSON.stringify(paths[0])}})`);
                   } catch (e) {}

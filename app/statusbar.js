@@ -34,7 +34,12 @@ class StatusBar extends Reflux.Component {
             {this.state.status.replace(/[_]/g, ' _ ')}
           </div>
           <div className="col-xs-6 textAlignRight">
-            {`Line ${this.state.position.lineNumber}, Column ${this.state.position.column}`}
+            <div className="col-xs-6">
+              {`Mulithreading: ${this.props.multiThreading ? 'Enabled' : 'Disabled'}`}
+            </div>
+            <div className="col-xs-6">
+              {`Line ${this.state.position.lineNumber}, Column ${this.state.position.column}`}
+            </div>
           </div>
         </div>
       </div>
