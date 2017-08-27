@@ -12,6 +12,7 @@ import v from 'vquery';
 
 import {init, walk, S, getSelected, getPercent, _log as log} from './utils';
 import EditorContainer from './editorContainer';
+import SplitPane from 'react-split-pane';
 import Tree from './tree';
 import StatusBar from './statusbar';
 
@@ -180,6 +181,10 @@ class Root extends Reflux.Component {
   checkFile = (i, z, selected) => {
     this.state.exmlFiles[i].exmls[z].selected = !selected;
     state.set({exmlFiles: this.state.exmlFiles});
+  onTreePaneDragFinished = (size) => {
+    state.set({treePaneSize: size});
+    this.editor.layout();
+  }
     const selectedLength = getSelected(this.state.exmlFiles).length;
     status.set(`${selectedLength} file${selectedLength > 1 ? 's' : ''} selected`);
   }
@@ -206,31 +211,38 @@ class Root extends Reflux.Component {
     };
     return (
       <div>
-        <div className="row">
-          <div
-          ref={(ref)=>this.fileContainer = ref}
-          className="col-xs-3 fileTree"
-          style={fileTreeStyle}>
-            {this.state.init && this.fileContainer && this.state.exmlFiles.length > 0 ?
-              <Tree
-              files={this.state.exmlFiles}
-              activeFile={this.state.activeFile}
-              onPakClick={this.togglePakExpand}
-              onFileClick={this.openFile}
-              onPakCheck={this.checkPak}
-              onFileCheck={this.checkFile}
-              fileContainer={this.fileContainer} />
-              :
-              <h3 className="welcomeText">Select File > Open to import PAK files.</h3>}
-          </div>
-          <EditorContainer
-          height={this.state.height}
-          language="xml"
-          theme="vs-dark"
-          editorDidMount={this.editorDidMount}
-          options={options} />
-          {this.editor ? <StatusBar editor={this.editor} /> : null}
-        </div>
+        {this.state.init ?
+          <div className="row">
+            <SplitPane
+            split="vertical"
+            defaultSize={this.state.treePaneSize}
+            onDragFinished={this.onTreePaneDragFinished}>
+              <div
+              ref={(ref)=>this.fileContainer = ref}
+              className="fileTree"
+              style={fileTreeStyle}>
+                {this.fileContainer && this.state.exmlFiles.length > 0 ?
+                  <Tree
+                  files={this.state.exmlFiles}
+                  activeFile={this.state.activeFile}
+                  onPakClick={this.togglePakExpand}
+                  onFileClick={this.openFile}
+                  onPakCheck={this.checkPak}
+                  onFileCheck={this.checkFile}
+                  fileContainer={this.fileContainer} />
+                  :
+                  <h3 className="welcomeText">Select File > Open to import PAK files.</h3>}
+              </div>
+              <EditorContainer
+              height={this.state.height}
+              width={window.innerWidth - this.state.treePaneSize}
+              language="xml"
+              theme="vs-dark"
+              editorDidMount={this.editorDidMount}
+              options={options} />
+            </SplitPane>
+            {this.editor ? <StatusBar editor={this.editor} multiThreading={this.state.multiThreading} /> : null}
+          </div> : null}
       </div>
     );
   }

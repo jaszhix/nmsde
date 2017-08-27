@@ -15,7 +15,7 @@ class EditorContainer extends Reflux.Component {
   }
   render() {
     return (
-      <div className="col-xs-9">
+      <div className="col-xs-12" style={{maxWidth: `${this.props.width}px`}}>
         <div className="row" style={{height: `${this.state.height}px`}}>
           <MonacoEditor
           value={this.state.editorValue}
