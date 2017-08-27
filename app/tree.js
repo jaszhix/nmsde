@@ -1,6 +1,7 @@
 import React from 'react';
 import _ from 'lodash';
 import {whichToShow} from './utils';
+import each from './each';
 
 class Tree extends React.Component {
   constructor(props) {
@@ -24,7 +25,7 @@ class Tree extends React.Component {
     this.range = whichToShow({
       outerHeight: node.clientHeight,
       scrollTop: node.scrollTop,
-      itemHeight: 29
+      itemHeight: 28
     });
     this.forceUpdate();
   }
@@ -80,7 +81,14 @@ class Tree extends React.Component {
                 {exp ?
                   <ul>
                     {_.map(pak.exmls, (exml, z)=>{
-                      let x = z + this.props.files.length + 1;
+                      let y = i - 1;
+                      let v = 0;
+
+                      while (y > -1) {
+                        v += this.props.files[y].expanded ? this.props.files[y].exmls.length + 1 : 1;
+                        y--;
+                      }
+                      let x = z + 1 + v;
                       let isVisible = x >= this.range.start && x <= this.range.start + this.range.length;
                       let isActive = exml.path === this.props.activeFile;
                       if (!isVisible) {
