@@ -14,6 +14,7 @@ import status from './status';
 export const S = process.platform === 'win32' ? '\\' : '/';
 export const dataDir = remote.app.getPath('userData');
 export const workDir = `${dataDir}${S}work`;
+export const appPath = remote.app.getAppPath();
 
 log.init(dataDir);
 export const _log = log;
@@ -73,7 +74,7 @@ export const walk = (dir, done)=>{
   });
 };
 
-export const exc = (cmd, cb)=>{
+export const exc = (cmd, cb, cwd)=>{
   if (!cb) {
     execSync(cmd);
   } else {
@@ -81,7 +82,7 @@ export const exc = (cmd, cb)=>{
       timeout: 0,
       maxBuffer: 2000*1024,
       killSignal: 'SIGTERM',
-      cwd: null,
+      cwd: cwd,
       env: null
     };
     /* if (process.platform === 'win32') {
@@ -148,6 +149,9 @@ export const getReadyStatusText = (workDir) => {
 };
 
 export const addFile = (file, s) => {
+  if (!file) {
+    return;
+  }
   const extension = _.last(file.split('.')).toLowerCase();
   let key = file.split(`EXMLs${S}`)[1].split(S)[0]
   key = key.substr(1, key.length);
@@ -188,7 +192,7 @@ export const getFileList = () => {
       :
       getReadyStatusText(workDir);
     status.set(readyState);
-    window.decompiling = false;
+    _.delay(()=>window.decompiling = false, 5000);
   });
 };
 
@@ -196,22 +200,45 @@ const decompileMBINFiles = (mbinDir, exmlDir, multiThreading) => {
   window.decompiling = true;
   editorValue.set('');
   walk(mbinDir, (err, files)=>{
+    if (err) {
+      status.set(`Unable to read the MBINs directory: ${err}`);
+      return;
+    }
+    if (files.length === 0) {
+      status.set(`Unable to find MBINs to decompile.`);
+      return;
+    }
     const _files = _.filter(files, (file)=>{
       let extension = _.last(file.split('.'));
       return extension.toLowerCase() === 'mbin';
     });
+    console.log(_files);
     const nonMBINFiles = _.filter(files, (file)=>{
       let extension = _.last(file.split('.')).toLowerCase();
       return extension === 'dds' || extension === 'bin';
     });
     each(nonMBINFiles, (file)=>{
       let exmlPath = file.replace(/MBINs/g, 'EXMLs');
-      fse.moveSync(file, exmlPath, {overwrite: true});
+      try {
+        fse.moveSync(file, exmlPath, {overwrite: true});
+      } catch (e) {
+        log.error(`Could not move file to EXMLs directory: ${e}`);
+        log.error('Attempting to copy instead.');
+        try {
+          fse.copySync(file, exmlPath);
+        } catch (e) {
+          status.set(`Unable to import ${file}: ${e}`);
+        }
+      }
     });
     const _filesLength = _files.length;
+    if (_filesLength === 0 && nonMBINFiles.length > 0) {
+      getFileList();
+      return;
+    }
     let z = 0;
     const end = () => {
-      if (z >= _filesLength - 1) {
+      if (z >= _filesLength - 1 || _filesLength === 1) {
         getFileList();
       }
     };
@@ -270,7 +297,7 @@ const decompileMBINFiles = (mbinDir, exmlDir, multiThreading) => {
         handleFail(file, i, s.mbinFailures, decompile);
       }
     };
-    if (multiThreading) {
+    if (multiThreading || _filesLength) {
       // Don't launch a ton of MBINCompiler processes at once
       let count = 0;
       each(_files, (file, i)=>{
@@ -348,6 +375,8 @@ const extractPakFiles = (workDir, mbinDir, exmlDir, exmlFiles, multiThreading) =
           status.set(fail);
           next(i, multiThreading, extract, end);
         }
+      } else {
+        status.set(fail);
       }
     };
     if (multiThreading) {
@@ -413,29 +442,66 @@ export const clearWorkSpace = () => {
 };
 window.clearWorkSpace = clearWorkSpace;
 
-const buildPAKFile = (psarcList, stagingDir, workDir) => {
-  status.set('Building PAK file')
-  const fail = 'PAK file failed to build.';
+export const removePak = (i) => {
+  const s = state.get();
+  status.set(`Removing ${s.exmlFiles[i].pak}.pak from the workspace...`);
   try {
-    exc(`.${S}bin${S}_psarc.exe ${psarcList.join(' ')}`);
+    fse.removeSync(`${s.workDir}${S}EXMLs${S}_${s.exmlFiles[i].pak}`);
   } catch (e) {
-    status.set(fail);
+    status.set(`Unable to delete ${s.exmlFiles[i].pak}.pak: ${e.message}`);
   }
-  walk(stagingDir, (err, files)=>{
+}
+
+export const removeExml = (exmlPath) => {
+  const name = _.last(exmlPath.split(S));
+  status.set(`Removing ${name} from the workspace...`);
+  try {
+    fse.removeSync(exmlPath);
+  } catch (e) {
+    status.set(`Unable to delete ${name}: ${e.message}`);
+  }
+}
+
+const buildPAKFile = (psarcList, stagingDir, workDir) => {
+  status.set('Building PAK file');
+  const stagingPsarcPath = `${stagingDir}${S}psarc.exe`;
+  const fileListPath = `${stagingDir}${S}files.txt`;
+  const outputPath = `${workDir}${S}NMSDE-${Date.now()}.pak`;
+  let relativeFileList = '';
+  console.log(path.resolve('.', `.${S}bin${S}psarc.exe`));
+  fse.copy(`.${S}bin${S}psarc.exe`, stagingPsarcPath, (err)=>{
     if (err) {
       log.error(err);
+      status.set(`PAK failed to build: ${err}`);
+      return;
     }
-    const _files = _.filter(files, (file)=>{
-      let extension = _.last(file.split('.'));
-      return extension.toLowerCase() === 'pak';
+    each(psarcList, (filePath)=>{
+      let relativePath = filePath.split(stagingDir)[1];
+      relativeFileList += `${relativePath.substr(1, relativePath.length)}\n`;
     });
-    if (_files.length > 0) {
-      let destination = `${workDir}${S}NMSDE-${Date.now()}.pak`;
-      fse.moveSync(_files[0], destination);
-      status.set(`PAK file successfully created at ${destination}`);
-    } else {
-      status.set(fail);
-    }
+
+    fse.writeFile(fileListPath, relativeFileList, {flag: 'w', encoding: 'utf8'}, (err)=>{
+      if (err) {
+        status.set(`PAK failed to build: ${err}`);
+        return;
+      }
+      const command = `.${S}psarc.exe create -a -y --zlib --inputfile="${fileListPath}" --output="${outputPath}"`;
+      exc(command, (err, stdout, stderr)=>{
+        let hasStdErr = stderr.trim().length > 0;
+        let _err = hasStdErr ? stderr : err;
+        if (_err) {
+          let editorString = editorValue.get();
+          editorString += 'PSARC error(s):\n';
+          editorString += `${_err}\n`;
+          editorValue.set(editorString);
+          status.set(`PAK failed to build: ${err}`);
+          return;
+        }
+        status.set(`PAK file successfully created at ${outputPath}`);
+        fse.removeSync(stagingPsarcPath);
+        fse.removeSync(fileListPath);
+      }, stagingDir);
+    });
   });
 };
 
@@ -479,11 +545,10 @@ const compileMBINFiles = (workDir, stagingDir) => {
 const rebuildXMLFiles = (selectedFiles) => {
   const s = state.get();
   const stagingDir = `${s.workDir}${S}staging`;
-  if (!fs.existsSync(stagingDir)) {
-    fs.mkdirSync(stagingDir);
-  } else {
-    fse.removeSync(stagingDir);
-    fs.mkdirSync(stagingDir);
+  try {
+    fse.ensureDirSync(stagingDir);
+  } catch (e) {
+    status.set(`Unable to rebuild XML files: ${e}`);
   }
   const builder = new xml2js.Builder();
   each(selectedFiles, (file)=>{
@@ -518,6 +583,10 @@ const checkAndMerge = (selectedFiles, conflicts, conflictPaths) => {
         next();
         return false;
       }
+      log.error(`Attempting to merge the following conflicts for file ${conflictFiles[0].pakPath}`);
+      each(_.map(conflictFiles, 'path'), (_path)=>{
+        log.error(_path);
+      });
       let conflictXMLObjects = _.map(conflictFiles, 'xmlObject');
       let mergedXMLObject = _.merge(...conflictXMLObjects);
       let refSelectedFile = _.findIndex(selectedFiles, {path: conflictFiles[0].path});
@@ -590,7 +659,9 @@ export const compileSelection = () => {
   const conflictPaths = Object.keys(conflicts);
   const conflictsLength = conflictPaths.length;
   if (conflictsLength > 0) {
-    status.set(`${conflictsLength} conflict${conflictsLength > 1 ? 's' : ''} found, will attempt reconciliation`);
+    const mergeNotice = `${conflictsLength} conflict${conflictsLength > 1 ? 's' : ''} found, will attempt reconciliation`;
+    log.error(mergeNotice);
+    status.set(mergeNotice);
   }
   getXMLObject(selectedFiles, 0, conflicts, conflictPaths)
 };

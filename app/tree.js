@@ -1,7 +1,10 @@
+import {remote} from 'electron';
 import React from 'react';
 import _ from 'lodash';
-import {whichToShow} from './utils';
+import {whichToShow, removePak, removeExml} from './utils';
 import each from './each';
+
+const {Menu, MenuItem} = remote;
 
 class Tree extends React.Component {
   constructor(props) {
@@ -11,11 +14,84 @@ class Tree extends React.Component {
   componentDidMount(){
     this.props.fileContainer.addEventListener('scroll', this.handleScroll);
     this.setViewableRange(this.props.fileContainer);
+    this.buildContextMenu(true);
+
+
+    const checkRef = () => {
+      if (!this.rootRef) {
+        _.delay(checkRef, 500);
+      } else {
+        this.rootRef.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const browserWindow = remote.getCurrentWindow();
+          browserWindow.__e = e;
+          this.contextMenu.popup(browserWindow);
+        }, false);
+      }
+    };
+    checkRef();
   }
   componentWillUnmount(){
     if (this.props.fileContainer) {
       this.props.fileContainer.removeEventListener('scroll', this.handleScroll);
     }
+  }
+  buildContextMenu = (init) => {
+    let hasSelections, hasExpanded = false;
+
+    if (!init) {
+      each(this.props.files, (pak, i)=>{
+        if (pak.selected) {
+          hasSelections = true;
+        }
+        if (pak.expanded) {
+          hasExpanded = true;
+        }
+        each(pak.exmls, (exml, z)=>{
+          if (exml.selected) {
+            hasSelections = true;
+          }
+        });
+      });
+      this.contextMenu.clear();
+    } else {
+      this.contextMenu = new Menu();
+    }
+
+    this.contextMenu.append(new MenuItem({
+      label: hasSelections ? 'Deselect All' : 'Select All',
+      click: (item) => {
+        each(this.props.files, (pak, i)=>{
+          this.props.onPakCheck(i, hasSelections);
+          each(pak.exmls, (exml, z)=>{
+            this.props.onFileCheck(i, z, hasSelections)
+          });
+        });
+        this.buildContextMenu();
+      }
+    }));
+    this.contextMenu.append(new MenuItem({
+      label: hasExpanded ? 'Collapse All' : 'Expand All',
+      click: (item) => {
+        each(this.props.files, (pak, i)=>{
+          this.onPakClick(i, hasExpanded);
+        });
+        this.buildContextMenu();
+      }
+    }));
+    this.contextMenu.append(new MenuItem({type: 'separator'}));
+    this.contextMenu.append(new MenuItem({
+      label: 'Remove From Workspace',
+      click: (item, browserWindow) => {
+        if (browserWindow.__e.srcElement.id.substr(0, 5) === 'pak__') {
+          const i = parseInt(browserWindow.__e.srcElement.id[5]);
+          removePak(i);
+        } else if (browserWindow.__e.srcElement.id.length > 0) {
+          removeExml(browserWindow.__e.srcElement.id);
+        }
+        browserWindow.__e = undefined;
+      }
+    }));
   }
   setViewableRange = (node) => {
     if (!node) {
@@ -43,11 +119,26 @@ class Tree extends React.Component {
   }
   onPakClick = (i, exp) => {
     this.props.onPakClick(i, exp);
-    _.defer(()=>this.setViewableRange(this.props.fileContainer));
+    _.defer(()=>{
+      this.setViewableRange(this.props.fileContainer);
+      this.buildContextMenu();
+    });
+  }
+  handlePakSelection = (i, selected) => {
+    this.props.onPakCheck(i, selected);
+    _.defer(this.buildContextMenu);
+  }
+  handleExmlSelection = (i, z, selected) => {
+    this.props.onFileCheck(i, z, selected);
+    _.defer(this.buildContextMenu);
+  }
+  getRootRef = (ref) => {
+    this.rootRef = ref;
   }
   render() {
     return (
       <div
+      ref={this.getRootRef}
       className="tree-checkbox-hierarchical well border-left-danger border-left-lg"
       style={{
         padding: '0px',
@@ -64,15 +155,20 @@ class Tree extends React.Component {
             return (
               <li
               key={i}>
-                <span className={`fancytree-node ${exp ? 'fancytree-expanded' : ''} fancytree-folder fancytree-has-children fancytree-exp-${expLetter} fancytree-ico-${expLetter}f ${pak.selected ? 'fancytree-selected' : ''}`}>
+                <span
+                id={`pak__${i}`}
+                className={`fancytree-node ${exp ? 'fancytree-expanded' : ''} fancytree-folder fancytree-has-children fancytree-exp-${expLetter} fancytree-ico-${expLetter}f ${pak.selected ? 'fancytree-selected' : ''}`}>
                   <span
+                  id={`pak__${i}`}
                   className="fancytree-expander"
                   onClick={()=>this.onPakClick(i, exp)} />
                   <span
+                  id={`pak__${i}`}
                   className="fancytree-checkbox"
-                  onClick={()=>this.props.onPakCheck(i, pak.selected)} />
-                  <span className="fancytree-icon" />
+                  onClick={()=>this.handlePakSelection(i, pak.selected)} />
+                  <span id={`pak__${i}`} className="fancytree-icon" />
                   <span
+                  id={`pak__${i}`}
                   className="fancytree-title"
                   onClick={()=>this.onPakClick(i, exp)}>
                     {pak.pak.replace(/[_]/g, ' _ ')}
@@ -100,13 +196,21 @@ class Tree extends React.Component {
                       }
                       return (
                         <li key={z}>
-                          <span className={`fancytree-node fancytree-exp-n fancytree-ico-c ${exml.selected ? 'fancytree-selected' : ''} ${isActive ? 'fancytree-active fancytree-focused' : ''}`}>
-                            <span className="fancytree-expander" />
+                          <span
+                          id={exml.path}
+                          className={`fancytree-node fancytree-exp-n fancytree-ico-c ${exml.selected ? 'fancytree-selected' : ''} ${isActive ? 'fancytree-active fancytree-focused' : ''}`}>
                             <span
+                            id={exml.path}
+                            className="fancytree-expander" />
+                            <span
+                            id={exml.path}
                             className="fancytree-checkbox"
-                            onClick={()=>this.props.onFileCheck(i, z, exml.selected)} />
-                            <span className="fancytree-icon" />
+                            onClick={()=>this.handleExmlSelection(i, z, exml.selected)} />
                             <span
+                            id={exml.path}
+                            className="fancytree-icon" />
+                            <span
+                            id={exml.path}
                             className="fancytree-title"
                             onClick={()=>this.props.onFileClick(i, z, exml.path)}>
                               {exml.name.replace(/[_]/g, ' _ ')}

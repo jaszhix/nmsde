@@ -60,7 +60,6 @@ class Root extends Reflux.Component {
     }
   }
   startMonitor = () => {
-    log.error(`Creating monitor for ${this.state.workDir}`);
     watch.createMonitor(`${this.state.workDir}${S}EXMLs`, {
       ignoreDotFiles: true,
       ignoreNotPermitted: false,
@@ -71,6 +70,7 @@ class Root extends Reflux.Component {
         status.set(`Updated ${f}`);
       });
       this.monitor.on('created', this.onFileCreated);
+      this.monitor.on('removed', this.removeFile);
     });
   }
   stopMonitor = () => {
@@ -86,7 +86,7 @@ class Root extends Reflux.Component {
     if (extension === 'exml'
     || extension === 'dds'
     || extension === 'bin') {
-      addFile(f);
+      addFile(f, this.state);
       status.set(`Loaded ${f}`);
     }
   }
@@ -128,7 +128,9 @@ class Root extends Reflux.Component {
         activeFile: exmlPath
       });
       const extension = this.state.exmlFiles[i].exmls[z].extension;
-      if (extension === 'bin') {
+      if (extension === 'exml') {
+        monaco.editor.setModelLanguage(this.editor.getModel(), 'xml');
+      } else if (extension === 'bin') {
         // TBD: Setting a GLSL-like syntax coloring for BIN files
         monaco.editor.setModelLanguage(this.editor.getModel(), 'cpp');
       }
